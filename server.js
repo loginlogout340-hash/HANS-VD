@@ -7,10 +7,12 @@ import {
   useMultiFileAuthState,
   Browsers,
   delay,
+  jidNormalizedUser,
 } from "@whiskeysockets/baileys";
 
 const app = express();
 app.use(cors());
+app.use(express.static("."));
 
 async function start(num, dir, res) {
   const { state, saveCreds } = await useMultiFileAuthState(dir);
@@ -22,17 +24,28 @@ async function start(num, dir, res) {
   sock.ev.on("creds.update", saveCreds);
 
   sock.ev.on("connection.update", async ({ connection, lastDisconnect }) => {
+    console.log("connection:", connection);
+
     if (connection === "open") {
-      const creds = fs.readFileSync(`${dir}/creds.json`);
-      await sock.sendMessage(sock.user.id, {
-        text: "SESSION:" + Buffer.from(creds).toString("base64"),
-      });
-      await delay(2000);
+      try {
+        await delay(3000);
+        const creds = fs.readFileSync(`${dir}/creds.json`);
+        const me = jidNormalizedUser(sock.user.id);
+        await sock.sendMessage(me, {
+          text: "SESSION:" + Buffer.from(creds).toString("base64"),
+        });
+        console.log("session sent");
+        await delay(3000);
+      } catch (e) {
+        console.log("send error:", e.message);
+      }
       sock.end();
       fs.rmSync(dir, { recursive: true, force: true });
     }
+
     if (connection === "close") {
       const status = lastDisconnect?.error?.output?.statusCode;
+      console.log("closed, status:", status);
       if (status !== 401 && fs.existsSync(dir)) start(num, dir);
     }
   });
@@ -53,6 +66,7 @@ app.get("/pair", async (req, res) => {
   try {
     await start(num, `./sessions/${num}-${Date.now()}`, res);
   } catch (e) {
+    console.log("pair error:", e.message);
     res.status(500).json({ error: "Could not get code, try again" });
   }
 });
